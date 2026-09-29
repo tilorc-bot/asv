@@ -429,7 +429,7 @@ $(document).ready(function() {
         var rev = null;
         $.each(main_json.revision_to_hash, function(revision, full_commit_hash) {
             if (full_commit_hash.startsWith(commit_hash)) {
-                rev = revision;
+                rev = parseInt(revision);
                 // break the $.each loop
                 return false;
             }

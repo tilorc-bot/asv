@@ -23,7 +23,7 @@ from . import tools
 from .tools import WAIT_TIME, WIN, get_with_retry
 
 
-def _rebuild_basic_html(basedir):
+def _rebuild_basic_html(basedir, environment_type='virtualenv'):
     local = abspath(dirname(__file__))
     cwd = os.getcwd()
 
@@ -55,6 +55,7 @@ def _rebuild_basic_html(basedir):
                 'html_dir': join(basedir, 'html'),
                 'repo': join(basedir, 'repo'),
                 'dvcs': 'git',
+                'environment_type': environment_type,
                 'project': 'asv',
                 'matrix': {"env": {"SOME_TEST_VAR": ["1"]}},
                 'regressions_first_commits': {'.*': first_tested_commit_hash},
@@ -341,8 +342,8 @@ def test_web_summarylist(browser, basic_html):
         assert m, cur_row2.text
 
         # Check link
-        base_href, qs = urllib.parse.splitquery(base_link.get_attribute('href'))
-        base_url, tag = urllib.parse.splittag(base_href)
+        base_href, _, qs = base_link.get_attribute("href").partition("?")
+        base_url, _, tag = base_href.partition("#")
         assert urllib.parse.parse_qs(qs) == {
             'ram': ['128GB'],
             'cpu': ['Blazingly fast'],

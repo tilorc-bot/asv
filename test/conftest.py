@@ -364,7 +364,9 @@ def dummy_packages(request, monkeypatch):
 def basic_html(request):
     with locked_cache_dir(request.config, "asv-test_web-basic_html", timeout=900) as cache_dir:
         tmpdir = join(str(cache_dir), 'cached')
-        html_dir, dvcs = _rebuild_basic_html(tmpdir)
+        html_dir, dvcs = _rebuild_basic_html(
+            tmpdir, request.config.getoption('environment_type')
+        )
         return html_dir, dvcs
 
 
