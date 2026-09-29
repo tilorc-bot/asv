@@ -374,6 +374,33 @@ stop serving.
 .. |screenshot2| image:: screenshot-bench.png
    :width: 45%
 
+In the graph of a benchmark, the sidebar has these controls besides the
+parameter selections:
+
+- **overlay**: draws other benchmarks on the same graph, against the
+  commit axis.  A parameter that the overlaid benchmark shares by name
+  with the main benchmark follows its selection; parameters that only
+  overlaid benchmarks have get their own selectors.
+
+- Lines with different units, e.g. seconds and a count, each get their
+  own y-axis: the first unit on the left, the others on the right.
+
+- **normalize lines**: shows each line as a percentage of its own first
+  nonzero value in the displayed commit range, so that relative changes of lines
+  with different units or magnitudes can be compared.  The **reference**
+  button instead divides all lines by one clicked value.
+
+- **change scatter**: for commits where two lines both have values, plots
+  the percentage change since the previous such commit of each line
+  against that of a chosen reference line.  This shows whether a change in
+  one metric (for example an operation count) predicts a change in
+  another (for example time).  Points on the gray diagonal changed by the
+  same fraction.
+
+These settings are kept in the URL, e.g.
+``#bench.time_x?overlay=bench.track_count&y-axis-scale=normalize&plot=change``,
+so a view can be linked to.
+
 To share the website on the open internet, simply put the files in the
 ``html`` directory on any webserver that can serve static content.  Github Pages
 works quite well, for example.  For using Github Pages, ``asv``

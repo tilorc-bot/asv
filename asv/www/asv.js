@@ -13,7 +13,7 @@ $(document).ready(function() {
     var window_last_location = null;
     /* Graph data cache */
     var graph_cache = {};
-    var graph_cache_max_size = 5;
+    var graph_cache_max_size = 50;
 
     var colors = [
         '#247AAD',

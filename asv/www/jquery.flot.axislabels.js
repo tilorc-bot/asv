@@ -70,6 +70,9 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
                     if (axisName.charAt(0) == 'x')
                         axis.labelHeight += h;
+                    else if (axis.position == 'right')
+                        // tick labels of right axes are left-aligned: keep a gap
+                        axis.labelWidth += w * 1.5;
                     else
                         axis.labelWidth += w;
                     opts.labelHeight = axis.labelHeight;
@@ -101,6 +104,13 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
                         if (axisName.charAt(0) == 'x') {
                             x = plot.getPlotOffset().left + plot.width()/2 - width/2;
                             y = plot.getCanvas().height;
+                        } else if (axis.box && axis.position == 'right') {
+                            // secondary y axes: label at the outer edge of the axis box
+                            x = axis.box.left + axis.box.width - height * 0.28;
+                            y = plot.getPlotOffset().top + plot.height()/2 - width/2;
+                        } else if (axis.box) {
+                            x = axis.box.left + height * 0.72;
+                            y = plot.getPlotOffset().top + plot.height()/2 - width/2;
                         } else {
                             x = height * 0.72;
                             y = plot.getPlotOffset().top + plot.height()/2 - width/2;
@@ -119,7 +129,11 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
                             elem.css('bottom', '0px');
                         } else {
                             elem.css('top', plot.getPlotOffset().top + plot.height()/2 - elem.outerHeight()/2 + 'px');
-                            elem.css('left', '0px');
+                            if (axis.position == 'right') {
+                                elem.css('right', '0px');
+                            } else {
+                                elem.css('left', '0px');
+                            }
                         }
                         plot.getPlaceholder().append(elem);
                     }

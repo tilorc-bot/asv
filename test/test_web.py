@@ -458,3 +458,121 @@ def test_web_graph_hash_range_to_url(browser, basic_html):
             browser.find_element(By.ID, 'range').get_attribute('value')
             == f'{short_start}..{short_end}'
         )
+
+
+# One machine configuration, so that each benchmark parameter gives one line
+_ONE_MACHINE = 'cpu=Blazingly%20fast&ram=128GB&NUL=%5Bnone%5D'
+
+
+def _plot_series(browser):
+    return browser.execute_script(
+        "var plot = $('#main-graph').data('plot');"
+        "if (!plot) { return null; }"
+        "return $.map(plot.getData(), function(s) {"
+        "    return [{label: s.label || null, yaxis: s.yaxis.n,"
+        "             position: s.yaxis.options.position || 'left',"
+        "             data: s.data, revisions: s.asv_revisions || null}];"
+        "});"
+    )
+
+
+def _wait_for_series(browser, check):
+    found = []
+
+    def done(*args):
+        series = _plot_series(browser)
+        if series and check(series):
+            found.append(series)
+            return True
+        return False
+
+    WebDriverWait(browser, WAIT_TIME).until(done)
+    return found[0]
+
+
+@pytest.mark.flaky(reruns=1, reruns_delay=5)
+def test_web_graph_overlay(browser, basic_html):
+    from selenium.webdriver.support.ui import Select
+
+    html_dir, dvcs = basic_html
+
+    def is_overlay(s):
+        return s['label'].startswith('params_examples.track_bytes')
+
+    with tools.preview(html_dir) as base_url:
+        get_with_retry(browser, f'{base_url}#params_examples.track_find_test?{_ONE_MACHINE}')
+        _wait_for_series(browser, lambda series: len(series) == 2)
+
+        # Add an overlay from the sidebar
+        Select(browser.find_element(By.CSS_SELECTOR, 'select.overlay-add')).select_by_value(
+            'params_examples.track_bytes'
+        )
+        series = _wait_for_series(browser, lambda series: any(is_overlay(s) for s in series))
+        hash_str = browser.execute_script("return window.location.hash;")
+        assert 'overlay=params_examples.track_bytes' in hash_str
+
+        # Units differ: the overlay goes on a second y-axis on the right
+        assert len(series) == 3
+        for s in series:
+            if is_overlay(s):
+                assert (s['yaxis'], s['position']) == (2, 'right')
+            else:
+                assert s['label'].startswith('params_examples.track_find_test: ')
+                assert (s['yaxis'], s['position']) == (1, 'left')
+
+        # Remove it again
+        browser.find_element(By.CSS_SELECTOR, '#graphdisplay-overlays a.btn').click()
+        series = _wait_for_series(browser, lambda series: not any(is_overlay(s) for s in series))
+        assert all(s['yaxis'] == 1 for s in series)
+        assert 'overlay=' not in browser.execute_script("return window.location.hash;")
+
+
+@pytest.mark.flaky(reruns=1, reruns_delay=5)
+def test_web_graph_normalize(browser, basic_html):
+    html_dir, dvcs = basic_html
+
+    with tools.preview(html_dir) as base_url:
+        get_with_retry(
+            browser,
+            f'{base_url}#params_examples.track_find_test?{_ONE_MACHINE}'
+            '&overlay=params_examples.track_bytes&y-axis-scale=normalize',
+        )
+        series = _wait_for_series(browser, lambda series: len(series) == 3)
+
+        # One axis in %; each line is 100 at its first nonzero value
+        for s in series:
+            assert s['yaxis'] == 1
+            values = [y for x, y in s['data'] if y]
+            assert values
+            assert pytest.approx(values[0]) == 100
+        bytes_line = [s for s in series if s['label'].startswith('params_examples.track_bytes')]
+        assert all(pytest.approx(y) == 100 for x, y in bytes_line[0]['data'])
+
+
+@pytest.mark.flaky(reruns=1, reruns_delay=5)
+def test_web_graph_change_scatter(browser, basic_html):
+    html_dir, dvcs = basic_html
+
+    with tools.preview(html_dir) as base_url:
+        url = f'{base_url}#params_examples.track_find_test?{_ONE_MACHINE}'
+        get_with_retry(browser, url)
+        lines = _wait_for_series(browser, lambda series: len(series) == 2)
+
+        get_with_retry(browser, url + '&plot=change')
+        scatter = _wait_for_series(browser, lambda series: any(s['revisions'] for s in series))
+
+    # Expected: % change between consecutive commits where both lines have
+    # values, of the second line (y) against the first (x)
+    ref = {x: y for x, y in lines[0]['data'] if y is not None}
+    other = sorted((x, y) for x, y in lines[1]['data'] if y is not None and x in ref)
+    expected = []
+    for (x0, y0), (x1, y1) in zip(other, other[1:]):
+        if y0 != 0 and ref[x0] != 0:
+            expected.append([100 * (ref[x1] / ref[x0] - 1), 100 * (y1 / y0 - 1)])
+    assert expected
+
+    points = [s for s in scatter if s['revisions']]
+    assert len(points) == 1
+    assert points[0]['label'] == lines[1]['label']
+    flat = [v for point in points[0]['data'] for v in point]
+    assert flat == pytest.approx([v for point in expected for v in point])

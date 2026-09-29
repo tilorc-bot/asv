@@ -47,6 +47,21 @@ $(document).ready(function() {
     var end_hash = null;
     var start_revision = null;
     var end_revision = null;
+    /* Other benchmarks drawn on the same graph (commit x-axis only) */
+    var overlay_benchmarks = [];
+    /* Benchmark parameter values selected by name (the p-<name> URL
+       keys); applied to overlaid benchmarks by parameter name */
+    var param_value_selection = {};
+    /* True when every line is shown as % of its own first nonzero value */
+    var normalize_scale = false;
+    /* True when showing per-commit % change of one line against the others */
+    var change_scatter = false;
+    /* Index of the line whose change goes on the scatter x-axis */
+    var scatter_x_line = 0;
+    /* Units of the y-axes, left axis first */
+    var y_units = [];
+    /* Incremented on each replace_graphs, to drop responses for old graphs */
+    var load_generation = 0;
 
 
     /* UTILITY FUNCTIONS */
@@ -92,6 +107,33 @@ $(document).ready(function() {
         } else {
             return rev;
         }
+    }
+
+    function benchmark_display_name(bm_name) {
+        return $.asv.main_json.benchmarks[bm_name].pretty_name || bm_name;
+    }
+
+    function escape_html(text) {
+        return $("<span>").text('' + text).html();
+    }
+
+    /* Commit subject line for a revision, if asv publish recorded it */
+    function commit_subject(rev) {
+        var subjects = $.asv.main_json.revision_to_subject;
+        return subjects ? subjects[rev] : undefined;
+    }
+
+    function commit_tooltip_suffix(rev) {
+        var text = " @ " + $.asv.get_commit_hash(rev);
+        var subject = commit_subject(rev);
+        if (subject) {
+            text += "<br/>" + escape_html(subject);
+        }
+        return text;
+    }
+
+    function format_percent(x) {
+        return (x > 0 ? "+" : "") + x.toFixed(1) + "%";
     }
 
     function get_commit_hash(x) {
@@ -152,6 +194,12 @@ $(document).ready(function() {
         /* Add insertion point for benchmark parameters */
         var bench_params_nav = $("<div id='graphdisplay-navigation-params'/>");
         nav.append(bench_params_nav);
+
+        /* Add insertion point for overlaid benchmarks */
+        nav.append($("<div id='graphdisplay-overlays'/>"));
+
+        /* Add insertion point for the change scatter settings */
+        nav.append($("<div id='graphdisplay-scatter'/>"));
 
         /* Benchmark panel */
         var panel_body = $.asv.ui.make_panel(nav, 'benchmark');
@@ -221,8 +269,10 @@ $(document).ready(function() {
             log_scale = !evt.target.classList.contains("active");
             reference_scale = false;
             zoom_y_axis = false;
+            normalize_scale = false;
             $('#reference').removeClass('active');
             $('#zoom-y-axis').removeClass('active');
+            $('#normalize').removeClass('active');
             reference = 1.0;
             update_state_url({'y-axis-scale': log_scale ? ['log']: []});
         });
@@ -231,8 +281,10 @@ $(document).ready(function() {
             zoom_y_axis = !evt.target.classList.contains("active");
             reference_scale = false;
             log_scale = false;
+            normalize_scale = false;
             $('#reference').removeClass('active');
             $('#log-scale').removeClass('active');
+            $('#normalize').removeClass('active');
             reference = 1.0;
             update_state_url({'y-axis-scale': zoom_y_axis ? ['zoom'] : []});
         });
@@ -243,6 +295,11 @@ $(document).ready(function() {
             zoom_y_axis = false;
             $('#log-scale').removeClass('active');
             $('#zoom-y-axis').removeClass('active');
+            if (normalize_scale) {
+                normalize_scale = false;
+                $('#normalize').removeClass('active');
+                update_state_url({'y-axis-scale': []});
+            }
             if (!reference_scale) {
                 reference = 1.0;
                 update_graphs();
@@ -255,6 +312,23 @@ $(document).ready(function() {
                 reference = 1.0;
                 select_reference = true;
             }
+        });
+
+        $('#normalize').on('click', function(evt) {
+            normalize_scale = !evt.target.classList.contains("active");
+            log_scale = false;
+            zoom_y_axis = false;
+            reference_scale = false;
+            reference = 1.0;
+            $('#log-scale').removeClass('active');
+            $('#zoom-y-axis').removeClass('active');
+            $('#reference').removeClass('active');
+            update_state_url({'y-axis-scale': normalize_scale ? ['normalize'] : []});
+        });
+
+        $('#change-scatter').on('click', function(evt) {
+            change_scatter = !evt.target.classList.contains("active");
+            update_state_url({'plot': change_scatter ? ['change'] : []});
         });
 
         $('#even-spacing').on('click', function(evt) {
@@ -308,12 +382,36 @@ $(document).ready(function() {
                 if (previous_hover != item.datapoint) {
                     previous_hover = item.datapoint;
                     var y = item.datapoint[1];
-                    var commit_hash = get_commit_hash(item.datapoint[0]);
-                    if (commit_hash) {
-                        var unit = $.asv.main_json.benchmarks[current_benchmark].unit;
+                    var series = item.series;
+                    if (series.asv_revisions) {
+                        /* Change scatter: a point is a pair of commits */
+                        var revs = series.asv_revisions[item.dataIndex];
                         showTooltip(
                             item.pageX, item.pageY,
-                            $.asv.pretty_unit(y, unit) + " @ " + commit_hash);
+                            escape_html(series.asv_x_label) + ": " + format_percent(item.datapoint[0]) + "<br/>" +
+                            escape_html(series.label) + ": " + format_percent(y) +
+                            commit_tooltip_suffix(revs[1]));
+                        return;
+                    }
+                    var commit_hash = get_commit_hash(item.datapoint[0]);
+                    if (commit_hash) {
+                        var unit = series.asv_unit || $.asv.main_json.benchmarks[current_benchmark].unit;
+                        var text;
+                        if (series.asv_base !== undefined) {
+                            text = y.toPrecision(3) + "% (" + $.asv.pretty_unit(y * series.asv_base / 100, unit) + ")";
+                        } else {
+                            text = $.asv.pretty_unit(y, unit);
+                        }
+                        var rev = date_scale ? date_to_revision[item.datapoint[0]] : item.datapoint[0];
+                        if (x_coordinate_axis == 0) {
+                            text += commit_tooltip_suffix(rev);
+                        } else {
+                            text += " @ " + commit_hash;
+                        }
+                        if (series.label) {
+                            text = escape_html(series.label) + "<br/>" + text;
+                        }
+                        showTooltip(item.pageX, item.pageY, text);
                     }
                 }
             } else {
@@ -335,7 +433,12 @@ $(document).ready(function() {
                         reference = item.datapoint[1];
                         update_graphs();
                     } else {
-                        var commit_hash = get_commit_hash(item.datapoint[0]);
+                        var commit_hash;
+                        if (item.series.asv_revisions) {
+                            commit_hash = $.asv.get_commit_hash(item.series.asv_revisions[item.dataIndex][1]);
+                        } else {
+                            commit_hash = get_commit_hash(item.datapoint[0]);
+                        }
                         if (previous_hash !== commit_hash) {
                             previous_hash = commit_hash;
                             window.open(
@@ -406,6 +509,13 @@ $(document).ready(function() {
             }
         }
 
+        param_value_selection = {};
+        $.each(state_selection, function(key, values) {
+            if (key.substr(0, 2) == 'p-') {
+                param_value_selection[key.substr(2)] = values;
+            }
+        });
+
         /* Default plot: up to 8 lines */
         benchmark_param_selection = [[null]];
         if (params.length >= 1) {
@@ -435,6 +545,121 @@ $(document).ready(function() {
         check_x_coordinate_axis();
         replace_params_ui();
         replace_benchmark_params_ui();
+        replace_overlay_ui();
+    }
+
+    /* Parameter selection for an overlaid benchmark, in the format of
+       benchmark_param_selection.  A parameter with the same name as one
+       of the main benchmark's follows its selection; otherwise the
+       p-<name> selection from the URL applies, or up to 8 lines. */
+    function overlay_param_selection(bm_name) {
+        var bm = $.asv.main_json.benchmarks[bm_name];
+        var main_bm = $.asv.main_json.benchmarks[current_benchmark];
+        var selection = [[null]];
+        var count = 1;
+        var max_curves = 8;
+
+        for (var k = 0; k < bm.params.length; ++k) {
+            var name = bm.param_names[k];
+            var values = bm.params[k];
+            var chosen = null;
+            var main_k = main_bm.param_names.indexOf(name);
+
+            if (main_k != -1 && main_k + 1 != x_coordinate_axis) {
+                chosen = $.map(benchmark_param_selection[main_k + 1], function(j) {
+                    return main_bm.params[main_k][j];
+                });
+            } else if (param_value_selection[name] !== undefined) {
+                chosen = param_value_selection[name];
+            }
+
+            var item = [];
+            for (var j = 0; j < values.length; ++j) {
+                if (chosen !== null ? chosen.indexOf(values[j]) != -1 : (j + 1) * count <= max_curves) {
+                    item.push(j);
+                }
+            }
+            count = count * Math.max(item.length, 1);
+            selection.push(item);
+        }
+        return selection;
+    }
+
+    function replace_overlay_ui() {
+        var index = $.asv.main_json;
+        var nav = $('#graphdisplay-overlays');
+        nav.empty();
+
+        if (!current_benchmark || x_coordinate_axis != 0) {
+            /* Overlays are drawn only against the commit axis */
+            return;
+        }
+
+        var panel_body = $.asv.ui.make_panel(nav, 'overlay');
+        var list = $('<div class="btn-group-vertical" style="width: 100%"/>');
+        panel_body.append(list);
+
+        $.each(overlay_benchmarks, function(i, bm_name) {
+            var button = $('<a class="btn btn-default btn-xs" role="button" ' +
+                           'style="text-align: left; overflow: hidden; text-overflow: ellipsis"/>');
+            button.text('\u00d7 ' + benchmark_display_name(bm_name));
+            button.attr('title', 'Remove ' + bm_name + ' from the graph');
+            button.on('click', function() {
+                update_state_url({'overlay': arr_remove_from(overlay_benchmarks, bm_name)});
+            });
+            list.append(button);
+        });
+
+        var select = $('<select class="form-control input-sm overlay-add" style="margin-top: 4px"/>');
+        select.append($('<option value=""/>').text('add benchmark\u2026'));
+        var names = Object.keys(index.benchmarks).sort();
+        $.each(names, function(i, bm_name) {
+            if (bm_name != current_benchmark && overlay_benchmarks.indexOf(bm_name) == -1) {
+                select.append($('<option/>').attr('value', bm_name).text(bm_name));
+            }
+        });
+        select.on('change', function() {
+            var bm_name = select.val();
+            if (bm_name) {
+                update_state_url({'overlay': overlay_benchmarks.concat([bm_name])});
+            }
+        });
+        panel_body.append(select);
+
+        /* Selectors for parameters that only overlaid benchmarks have */
+        var main_names = index.benchmarks[current_benchmark].param_names;
+        var shown = {};
+        $.each(overlay_benchmarks, function(i, bm_name) {
+            var bm = index.benchmarks[bm_name];
+            var selection = overlay_param_selection(bm_name);
+            $.each(bm.params, function(k, values) {
+                var name = bm.param_names[k];
+                if (main_names.indexOf(name) != -1 || shown[name] || values.length < 2) {
+                    return;
+                }
+                shown[name] = true;
+                var selected = $.map(selection[k + 1], function(j) { return values[j]; });
+                $.asv.ui.make_value_selector_panel(nav, name, values, function(j, value, button) {
+                    button.text('' + $.asv.convert_benchmark_param_value(value));
+                    if (selected.indexOf(value) == -1) {
+                        button.removeClass('active');
+                    }
+                    button.on('click', function(evt) {
+                        var new_selection;
+                        if (!evt.target.classList.contains("active")) {
+                            new_selection = selected.concat([value]);
+                        } else {
+                            new_selection = arr_remove_from(selected, value);
+                        }
+                        var update = {};
+                        update['p-' + name] = new_selection;
+                        update_state_url(update);
+                    });
+                });
+            });
+        });
+
+        $.asv.ui.reflow_value_selector_panels();
     }
 
     function update_state_url(params) {
@@ -834,8 +1059,21 @@ $(document).ready(function() {
            active. */
         graphs = [];
         orig_graphs = [];
+        load_generation += 1;
+        var generation = load_generation;
 
-        var to_load = collect_graphs(current_benchmark, state, benchmark_param_selection);
+        var to_load = [];
+        var drawn_benchmarks = [current_benchmark];
+        if (current_benchmark && x_coordinate_axis == 0) {
+            drawn_benchmarks = drawn_benchmarks.concat(overlay_benchmarks);
+        }
+        $.each(drawn_benchmarks, function(i, bm_name) {
+            var selection = (i == 0) ? benchmark_param_selection : overlay_param_selection(bm_name);
+            $.each(collect_graphs(bm_name, state, selection), function(j, item) {
+                item.push(bm_name);
+                to_load.push(item);
+            });
+        });
         var failures = 0;
         var count = 1;
 
@@ -850,9 +1088,15 @@ $(document).ready(function() {
 
         current_revisions = [];
         $.each(to_load, function(i, item) {
+            var bm_name = item[2];
+            var bm = $.asv.main_json.benchmarks[bm_name];
             $.asv.load_graph_data(
                 item[0]
             ).done(function (data) {
+                if (generation != load_generation) {
+                    /* The graph selection changed while loading */
+                    return;
+                }
                 if (start_revision !== null || end_revision !== null) {
                     data = $.grep(data, function(point) {
                         var rev = point[0];
@@ -875,17 +1119,32 @@ $(document).ready(function() {
                     series = $.asv.filter_graph_data(data,
                                                      x_coordinate_axis,
                                                      graph_content[0],
-                                                     $.asv.main_json.benchmarks[current_benchmark].params);
+                                                     bm.params);
+                    var label = graph_content[1];
+                    if (drawn_benchmarks.length > 1) {
+                        /* Several benchmarks: name each line's benchmark */
+                        var name = benchmark_display_name(bm_name);
+                        label = label ? name + ": " + label : name;
+                    }
                     orig_graphs.push({
                         data: series,
-                        label: graph_content[1],
+                        label: label,
                         bars: { order: count, },
+                        asv_benchmark: bm_name,
+                        asv_unit: bm.unit,
+                        /* Responses arrive in any order; keep lines (and
+                           so their colors) in the order they were requested */
+                        asv_order: i * 100000 + j
                     });
                     count += 1;
                 });
+                orig_graphs.sort(function(a, b) { return a.asv_order - b.asv_order; });
                 graphs = orig_graphs;
                 update_graphs();
             }).fail(function () {
+                if (generation != load_generation) {
+                    return;
+                }
                 failures += 1;
                 if (failures == to_load.length) {
                     /* If we don't get any results, we check that the
@@ -907,18 +1166,85 @@ $(document).ready(function() {
         });
     }
 
-    /* Handle log scaling the plot */
+    /* Put lines with different units on different y-axes: the first
+       unit on the left, the others on the right */
+    function assign_y_axes(options) {
+        y_units = [];
+        $.each(graphs, function(i, graph) {
+            var unit;
+            if (normalize_scale) {
+                unit = '% of first value';
+            } else if (reference_scale || !graph.asv_unit) {
+                unit = $.asv.main_json.benchmarks[current_benchmark].unit;
+            } else {
+                unit = graph.asv_unit;
+            }
+            var idx = y_units.indexOf(unit);
+            if (idx == -1) {
+                y_units.push(unit);
+                idx = y_units.length - 1;
+            }
+            graph.yaxis = idx + 1;
+        });
+        if (!y_units.length) {
+            y_units.push($.asv.main_json.benchmarks[current_benchmark].unit);
+        }
+
+        options.yaxes = $.map(y_units, function(unit, i) {
+            var axis = $.extend({}, options.yaxis);
+            if (i > 0) {
+                /* flot draws grid lines for the first axis only */
+                axis.position = 'right';
+            }
+            return axis;
+        });
+    }
+
+    /* Show each line as % of its first nonzero value, so that lines
+       with different units can be compared */
+    function handle_normalize() {
+        if (!normalize_scale) {
+            return;
+        }
+        graphs = $.map(graphs, function(graph) {
+            var base = null;
+            for (var j = 0; j < graph.data.length; ++j) {
+                if (graph.data[j][1] !== null && graph.data[j][1] !== 0) {
+                    base = graph.data[j][1];
+                    break;
+                }
+            }
+            var copy = $.extend({}, graph);
+            copy.asv_base = base;
+            copy.data = $.map(graph.data, function(point) {
+                var y = (point[1] === null || base === null) ? null : 100 * point[1] / base;
+                return [[point[0], y]];
+            });
+            return copy;
+        });
+    }
+
     function handle_y_scale(options) {
         if (!graphs.length)
             return;
 
+        $.each(options.yaxes, function(i, axis_options) {
+            var axis_graphs = $.grep(graphs, function(graph) {
+                return graph.yaxis == i + 1;
+            });
+            handle_y_axis_scale(options, axis_options, axis_graphs, y_units[i]);
+        });
+    }
+
+    /* Handle log scaling of one y-axis */
+    function handle_y_axis_scale(options, axis_options, axis_graphs, unit) {
         /* Find the minimum and maximum values */
         var min = Infinity;
         var max = -Infinity;
         var left = options.xaxis.min || 0;
         var right = options.xaxis.max || Infinity;
 
-        $.each(graphs, function(i, graph) {
+        $.each(axis_graphs, function(i, graph) {
             var data = graph.data;
             var j = 0;
             if (!x_coordinate_is_category) {
@@ -955,8 +1281,8 @@ $(document).ready(function() {
         min /= reference;
         max /= reference;
 
-        options.yaxis.min = min;
-        options.yaxis.max = max;
+        axis_options.min = min;
+        axis_options.max = max;
 
         if (log_scale || reference_scale) {
             min = Math.floor(Math.log(min) / Math.LN10);
@@ -981,8 +1307,8 @@ $(document).ready(function() {
                 ticks.push(Math.pow(10, x) * reference);
             }
 
-            options.yaxis.ticks = ticks;
-            options.yaxis.transform = function(v) {
+            axis_options.ticks = ticks;
+            axis_options.transform = function(v) {
                 if (v <= 0) {
                     return null;
                 } else {
@@ -990,24 +1316,23 @@ $(document).ready(function() {
                 }
             };
             /* inverseTransform is required for plothover to work */
-            options.yaxis.inverseTransform = function (v) {
+            axis_options.inverseTransform = function (v) {
                 return Math.pow(10.0, v);
             };
-            options.yaxis.tickDecimals = 3;
-            options.yaxis.tickFormatter = function (v, axis) {
+            axis_options.tickDecimals = 3;
+            axis_options.tickFormatter = function (v, axis) {
                 return "10" + (
                     Math.round(
                         Math.log(v / reference) / Math.LN10)).toString().sup();
             };
-            options.yaxis.min = Math.pow(10, min) * reference;
-            options.yaxis.max = Math.pow(10, max) * reference;
+            axis_options.min = Math.pow(10, min) * reference;
+            axis_options.max = Math.pow(10, max) * reference;
 
             if (!reference_scale) {
-                options.yaxis.axisLabel = $.asv.main_json.benchmarks[current_benchmark].unit;
+                axis_options.axisLabel = unit;
             }
         }
         else {
-            var unit = $.asv.main_json.benchmarks[current_benchmark].unit;
             var unit_list = null;
 
             if (unit == "seconds") {
@@ -1019,8 +1344,8 @@ $(document).ready(function() {
 
             if (unit_list !== null) {
                 if (!zoom_y_axis) {
-                    options.yaxis.min = 0.0;
-                    options.yaxis.max = max * 1.3;
+                    axis_options.min = 0.0;
+                    axis_options.max = max * 1.3;
                 }
 
                 var unit_name = null;
@@ -1041,8 +1366,8 @@ $(document).ready(function() {
             }
 
             if (unit_name) {
-                options.yaxis.axisLabel = unit_name;
-                options.yaxis.tickFormatter = function (v, axis) {
+                axis_options.axisLabel = unit_name;
+                axis_options.tickFormatter = function (v, axis) {
                     return (v / multiplier).toPrecision(3);
                 }
             }
@@ -1138,12 +1463,164 @@ $(document).ready(function() {
         }
     }
 
+    /* Per-commit % change of each line against the % change of one
+       reference line, for commits where both lines have values.  Shows
+       whether a change in one metric (e.g. a count) predicts a change
+       in another (e.g. time). */
+    function change_scatter_series(lines, x_line) {
+        function sorted_points(line) {
+            /* [revision, value] points with a value, by revision */
+            var points = $.grep(line.data, function(point) {
+                return point[1] !== null;
+            });
+            points.sort(function(a, b) { return a[0] - b[0]; });
+            return points;
+        }
+
+        var ref = lines[x_line];
+        var ref_values = {};
+        $.each(sorted_points(ref), function(i, point) {
+            ref_values[point[0]] = point[1];
+        });
+
+        var series = [];
+        $.each(lines, function(i, line) {
+            if (i == x_line) {
+                return;
+            }
+            var data = [];
+            var revisions = [];
+            var prev = null;
+            $.each(sorted_points(line), function(j, point) {
+                var rev = point[0];
+                if (ref_values[rev] === undefined) {
+                    return;
+                }
+                if (prev !== null && prev[1] !== 0 && ref_values[prev[0]] !== 0) {
+                    data.push([100 * (ref_values[rev] / ref_values[prev[0]] - 1),
+                               100 * (point[1] / prev[1] - 1)]);
+                    revisions.push([prev[0], rev]);
+                }
+                prev = point;
+            });
+            series.push({
+                data: data,
+                label: line.label,
+                color: i,
+                lines: { show: false },
+                points: { show: true, radius: 3 },
+                asv_revisions: revisions,
+                asv_x_label: ref.label
+            });
+        });
+        return series;
+    }
+
+    function replace_scatter_ui(lines) {
+        var nav = $('#graphdisplay-scatter');
+        nav.empty();
+        if (lines.length < 2) {
+            return;
+        }
+        $.asv.ui.make_value_selector_panel(nav, 'change scatter x-axis', lines, function(i, line, button) {
+            button.text(line.label || benchmark_display_name(current_benchmark));
+            button.css({'text-align': 'left', 'overflow': 'hidden', 'text-overflow': 'ellipsis'});
+            if (i != scatter_x_line) {
+                button.removeClass('active');
+            }
+            button.on('click', function(evt) {
+                $(evt.target).siblings().removeClass('active');
+                update_state_url({'scatter-x': [i]});
+            });
+        });
+        $.asv.ui.reflow_value_selector_panels();
+    }
+
+    function draw_change_scatter() {
+        var lines = orig_graphs;
+        var graph_div = $('#main-graph');
+        $('#overview').empty();
+        $("#range")[0].value = '';
+        replace_scatter_ui(lines);
+
+        if (lines.length < 2) {
+            graph_div.html("<div style='display: flex; justify-content: center;" +
+                           " align-items: center; height: 100%;'>" +
+                           "<p style='font-size: 2rem;'>The change scatter needs two or more lines: " +
+                           "add an overlay or select more parameter values.</p></div>");
+            return;
+        }
+
+        var x_line = (scatter_x_line < lines.length) ? scatter_x_line : 0;
+        var series = change_scatter_series(lines, x_line);
+
+        /* y = x: both lines changed by the same fraction */
+        var lo = Infinity;
+        var hi = -Infinity;
+        $.each(series, function(i, s) {
+            $.each(s.data, function(j, point) {
+                lo = Math.min(lo, point[0], point[1]);
+                hi = Math.max(hi, point[0], point[1]);
+            });
+        });
+        if (isFinite(lo)) {
+            series.unshift({
+                data: [[lo, lo], [hi, hi]],
+                color: '#ccc',
+                lines: { show: true, lineWidth: 1 },
+                points: { show: false },
+                hoverable: false
+            });
+        }
+
+        var x_label = lines[x_line].label || benchmark_display_name(current_benchmark);
+        $.plot(graph_div, series, {
+            colors: $.asv.colors,
+            series: { shadowSize: 0 },
+            grid: {
+                hoverable: true,
+                clickable: true,
+                markings: [
+                    { color: '#999', lineWidth: 1, xaxis: { from: 0, to: 0 } },
+                    { color: '#999', lineWidth: 1, yaxis: { from: 0, to: 0 } }
+                ]
+            },
+            xaxis: {
+                axisLabel: '% change per commit: ' + x_label,
+                axisLabelUseCanvas: true,
+                axisLabelFontFamily: "sans-serif",
+                axisLabelFontSizePixels: 12,
+                tickFormatter: function(v) { return v + '%'; }
+            },
+            yaxis: {
+                axisLabel: '% change per commit',
+                axisLabelUseCanvas: true,
+                axisLabelFontFamily: "sans-serif",
+                axisLabelFontSizePixels: 12,
+                tickFormatter: function(v) { return v + '%'; }
+            },
+            legend: {
+                show: show_legend,
+                position: "nw",
+                labelFormatter: function(label, series) {
+                    return $("<span>").text(label).html();
+                }
+            }
+        });
+    }
+
     /* Once we have all of the graphs loaded, send them to flot for
        drawing. */
     function update_graphs() {
         if (current_benchmark === null) {
             return;
         }
+
+        if (change_scatter && x_coordinate_axis == 0) {
+            draw_change_scatter();
+            return;
+        }
+        $('#graphdisplay-scatter').empty();
 
         var markings = [];
 
@@ -1227,6 +1704,8 @@ $(document).ready(function() {
         };
 
         handle_x_scale(options);
+        handle_normalize();
+        assign_y_axes(options);
         handle_y_scale(options);
 
         var graph_div = $('#main-graph');
@@ -1254,11 +1733,13 @@ $(document).ready(function() {
                     ticks: [],
                     mode: "time"
                 },
-                yaxis: {
-                    ticks: [],
-                    min: 0,
-                    autoscaleMargin: 0.1
-                },
+                yaxes: $.map(y_units, function() {
+                    return {
+                        ticks: [],
+                        min: 0,
+                        autoscaleMargin: 0.1
+                    };
+                }),
                 selection: {
                     mode: "x"
                 },
@@ -1435,8 +1916,13 @@ $(document).ready(function() {
             delete params['commits'];
         }
 
+        normalize_scale = false;
+        $('#normalize').removeClass('active');
         if (params['y-axis-scale']) {
-            if (params['y-axis-scale'][0] === 'log') {
+            if (params['y-axis-scale'][0] === 'normalize') {
+                $('#normalize').addClass('active');
+                normalize_scale = true;
+            } else if (params['y-axis-scale'][0] === 'log') {
                 $('#log-scale').addClass('active');
                 log_scale = true;
             } else if (params['y-axis-scale'][0] === 'zoom') {
@@ -1444,6 +1930,31 @@ $(document).ready(function() {
                 zoom_y_axis = true;
             }
             delete params['y-axis-scale'];
+        }
+
+        overlay_benchmarks = [];
+        if (params['overlay']) {
+            $.each(params['overlay'], function(i, bm_name) {
+                if ($.asv.main_json.benchmarks[bm_name] && bm_name != benchmark &&
+                        overlay_benchmarks.indexOf(bm_name) == -1) {
+                    overlay_benchmarks.push(bm_name);
+                }
+            });
+            delete params['overlay'];
+        }
+
+        change_scatter = !!(params['plot'] && params['plot'][0] === 'change');
+        if (change_scatter) {
+            $('#change-scatter').addClass('active');
+        } else {
+            $('#change-scatter').removeClass('active');
+        }
+        delete params['plot'];
+
+        scatter_x_line = 0;
+        if (params['scatter-x']) {
+            scatter_x_line = parseInt(params['scatter-x'][0]) || 0;
+            delete params['scatter-x'];
         }
 
         if (params['x-axis-scale']) {
