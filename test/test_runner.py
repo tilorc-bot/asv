@@ -206,6 +206,33 @@ def test_quick(benchmarks_fixture):
     assert times['time_examples.TimeWithRepeat.time_it'].stderr.split() == expected
 
 
+def test_track_timing_samples(benchmarks_fixture):
+    # A track_ benchmark may return timing samples instead of a number,
+    # and then gets the same statistics as a time_ benchmark
+    conf, repo, envs, commit_hash = benchmarks_fixture
+
+    with open(join('benchmark', 'track_samples.py'), 'w') as f:
+        f.write(
+            "def track_samples():\n"
+            "    return {'samples': [1.0, 2.0, 3.0, 4.0, 5.0], 'number': 10}\n"
+            "track_samples.unit = 'seconds'\n"
+        )
+
+    b = benchmarks.Benchmarks.discover(conf, repo, envs, [commit_hash], regex='track_samples')
+    results = runner.run_benchmarks(b, envs[0], record_samples=True)
+    r = ResultsWrapper(results, b)['track_samples.track_samples']
+
+    assert r.errcode == 0
+    assert r.result == [3.0]
+    assert r.samples == [[1.0, 2.0, 3.0, 4.0, 5.0]]
+    stats = r.stats[0]
+    assert stats['number'] == 10
+    assert stats['repeat'] == 5
+    assert stats['q_25'] == 2.0
+    assert stats['q_75'] == 4.0
+    assert stats['ci_99_a'] <= 3.0 <= stats['ci_99_b']
+
+
 def test_skip_param_selection():
     d = {'repo': 'foo'}
     d.update(ASV_CONF_JSON)

@@ -20,7 +20,8 @@ The following benchmark types are recognized:
 - ``def mem_*()``: measure memory size of the object returned.  See :ref:`memory-benchmarks`.
 - ``def peakmem_*()``: measure peak memory size of the process when calling the function.
   See :ref:`peak-memory`.
-- ``def track_*()``: use the returned numerical value as the benchmark result
+- ``def track_*()``: use the returned numerical value as the benchmark result,
+  or timing-style samples ``{"samples": [...], "number": n}``.
   See :ref:`tracking`.
 
 .. note::

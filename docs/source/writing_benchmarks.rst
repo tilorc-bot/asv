@@ -580,6 +580,29 @@ garbage collector at a given state::
         return len(gc.get_objects())
     track_num_objects.unit = "objects"
 
+A tracking benchmark can also return repeated measurements of a
+value, in the same form as timing benchmarks produce them: a dictionary
+``{"samples": [...], "number": n}``, where ``samples`` are the measured
+values per iteration and ``number`` is the number of iterations each
+sample was averaged over.  ``asv`` then records the median as the result,
+together with the same statistics as for timing benchmarks (confidence
+interval, quartiles, sample count), which ``asv compare`` and ``asv
+continuous`` use to decide whether a change is significant.  This is
+useful for timing something that ``time_`` benchmarks cannot express,
+for example a phase inside a larger computation::
+
+    import time
+
+    def track_solve_phase():
+        samples = []
+        for _ in range(10):
+            problem = build_problem()
+            start = time.perf_counter()
+            problem.solve()
+            samples.append(time.perf_counter() - start)
+        return {"samples": samples, "number": 1}
+    track_solve_phase.unit = "seconds"
+
 For details, see :doc:`benchmarks`.
 
 
