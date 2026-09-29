@@ -152,6 +152,14 @@ class Repo:
         """
         raise NotImplementedError()
 
+    def get_commit_subjects(self, commits):
+        """
+        Get a dict mapping each of the given commit hashes to the first
+        line of its commit message.  Commits without a known subject
+        are left out; the default implementation knows none.
+        """
+        return {}
+
     def get_date_from_name(self, name):
         """
         Get a JavaScript timestamp for a particular name.

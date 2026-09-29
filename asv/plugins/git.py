@@ -194,6 +194,15 @@ class Git(Repo):
     def get_branch_commits(self, branch):
         return self.get_hashes_from_range(self.get_branch_name(branch))
 
+    def get_commit_subjects(self, commits):
+        subjects = {}
+        output = self._run_git(["log", "--all", "--format=%H%x00%s"], dots=False)
+        for line in output.splitlines():
+            commit, _, subject = line.partition("\0")
+            if commit in commits:
+                subjects[commit] = subject
+        return subjects
+
     def get_revisions(self, commits):
         revisions = {}
         for i, commit in enumerate(

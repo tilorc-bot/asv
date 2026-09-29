@@ -191,6 +191,17 @@ def test_publish_range_spec(generate_result_dir):
         assert set(data['revision_to_hash'].values()) == expected
 
 
+def test_publish_commit_subjects(generate_result_dir):
+    conf, repo, commits = generate_result_dir(3 * [1])
+    tools.run_asv_with_conf(conf, "publish")
+    data = util.load_json(join(conf.html_dir, 'index.json'))
+    subjects = {
+        data['revision_to_hash'][rev]: subject
+        for rev, subject in data['revision_to_subject'].items()
+    }
+    assert subjects == {commit: f"Revision {i + 1}" for i, commit in enumerate(commits)}
+
+
 @pytest.mark.flaky_pypy
 def test_regression_simple(generate_result_dir):
     conf, repo, commits = generate_result_dir(5 * [1] + 5 * [10])

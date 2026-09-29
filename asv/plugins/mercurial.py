@@ -168,6 +168,14 @@ class Hg(Repo):
             query.format(self.get_branch_name(branch)), followfirst=True
         )
 
+    def get_commit_subjects(self, commits):
+        subjects = {}
+        for item in self._repo.log(b"all()"):
+            node = self._decode(item.node)
+            if node in commits:
+                subjects[node] = self._decode(item.desc).split("\n", 1)[0]
+        return subjects
+
     def get_revisions(self, commits):
         revisions = {}
         for i, item in enumerate(self._repo.log(b"all()")):

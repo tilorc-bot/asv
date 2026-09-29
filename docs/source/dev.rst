@@ -250,6 +250,9 @@ A benchmark suite directory has the following layout.  The
       revisions (including tags).  This allows the x-scale of a plot to be scaled
       by date.
 
+    - ``revision_to_subject``: A dictionary mapping revision number to the
+      first line of the commit message, shown in the graph tooltips.
+
     - ``machines``: Describes the machines used for testing.
 
     - ``params``: A dictionary of parameters against which benchmark

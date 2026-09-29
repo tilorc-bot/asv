@@ -296,6 +296,10 @@ class Publish(Command):
             params[key] = val
         params['branch'] = [repo.get_branch_name(branch) for branch in conf.branches]
         revision_to_hash = {r: h for h, r in revisions.items()}
+        revision_to_subject = {
+            revisions[h]: subject
+            for h, subject in repo.get_commit_subjects(set(revisions)).items()
+        }
         util.write_json(
             os.path.join(conf.html_dir, "index.json"),
             {
@@ -305,6 +309,7 @@ class Publish(Command):
                 'hash_length': conf.hash_length,
                 'revision_to_hash': revision_to_hash,
                 'revision_to_date': revision_to_date,
+                'revision_to_subject': revision_to_subject,
                 'params': params,
                 'graph_param_list': graph_param_list,
                 'benchmarks': benchmark_map,
