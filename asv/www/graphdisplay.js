@@ -161,6 +161,7 @@ $(document).ready(function() {
         current_benchmark = bm_name;
         highlighted_revisions = highlight_revisions;
         $("#title").text(bm_name);
+        $("#nav-explore").attr("href", "explore.html#b=" + encodeURIComponent(bm_name));
         resolve_hash_filter();
         setup_benchmark_params(state_selection);
         replace_graphs();

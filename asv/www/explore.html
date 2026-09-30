@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>airspeed velocity</title>
+    <link rel="shortcut icon" href="swallow.ico">
+    <link rel="stylesheet" href="explore.css">
+    <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"
+            integrity="sha384-Gx3t0zdBAuQOuvvmaLZj7HKEiSgWTAs+VdtNY7wt19QDPTDQjFIwAuXDj0zeN00c"
+            crossorigin="anonymous"></script>
+    <script src="explore.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <button type="button" class="icon-button sidebar-toggle" id="sidebar-toggle"
+              aria-controls="sidebar" aria-expanded="false">Benchmarks</button>
+      <a class="brand" href="#" id="brand">
+        <img src="swallow.png" width="20" height="20" alt="">
+        <span class="brand-name">airspeed velocity</span>
+        <span class="brand-project" id="project-name"></span>
+      </a>
+      <nav class="topnav" aria-label="Pages">
+        <a href="#" id="nav-overview">Overview</a>
+        <a href="index.html" id="nav-classic">Classic view</a>
+      </nav>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar" id="sidebar">
+        <label class="visually-hidden" for="search">Find a benchmark</label>
+        <input type="search" id="search" class="search" placeholder="Find a benchmark" autocomplete="off">
+        <div class="tree" id="tree" role="tree"></div>
+      </aside>
+
+      <main class="main" id="main">
+        <p class="loading" id="loading">Loading benchmark results…</p>
+      </main>
+    </div>
+
+    <div class="tooltip" id="tooltip" role="status" hidden></div>
+  </body>
+</html>

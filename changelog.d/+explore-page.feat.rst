@@ -1,0 +1,1 @@
+New "Explore" page (``explore.html``): an overview of the changes beyond the noise per benchmark, and graphs with confidence-interval bands, marked and listed changes, commit details, overlays in one panel per unit, and dark mode.

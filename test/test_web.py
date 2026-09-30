@@ -576,3 +576,115 @@ def test_web_graph_change_scatter(browser, basic_html):
     assert points[0]['label'] == lines[1]['label']
     flat = [v for point in points[0]['data'] for v in point]
     assert flat == pytest.approx([v for point in expected for v in point])
+
+
+# The explore page writes negative changes with a minus sign
+MINUS = chr(0x2212)
+
+
+def _wait_for(browser, script, *args):
+    """Wait until the JavaScript expression `script` returns something truthy"""
+    found = []
+
+    def done(*a):
+        value = browser.execute_script(script, *args)
+        if value:
+            found.append(value)
+            return True
+        return False
+
+    WebDriverWait(browser, WAIT_TIME).until(done)
+    return found[0]
+
+
+@pytest.mark.flaky(reruns=1, reruns_delay=5)
+def test_web_explore_overview(browser, basic_html):
+    html_dir, dvcs = basic_html
+
+    with tools.preview(html_dir) as base_url:
+        get_with_retry(browser, f'{base_url}explore.html#show=all')
+        names = _wait_for(
+            browser,
+            "var rows = document.querySelectorAll('.overview-table tbody tr td.bench a');"
+            "return rows.length ? Array.from(rows, a => a.textContent) : null;",
+        )
+        assert 'params_examples.track_find_test' in names
+
+        # track_find_test steps from 0 to 1 to 3 to 2: its last change is 3 -> 2
+        row_text = browser.execute_script(
+            "return Array.from(document.querySelectorAll('.overview-table tbody tr'))"
+            "  .find(tr => tr.querySelector('td.bench a').textContent"
+            "              === 'params_examples.track_find_test').textContent;"
+        )
+        assert MINUS + '33.3%' in row_text
+
+        # The benchmark link opens its graph at the commit of that change
+        href = browser.execute_script(
+            "return Array.from(document.querySelectorAll('.overview-table td.bench a'))"
+            "  .find(a => a.textContent === 'params_examples.track_find_test').getAttribute('href');"
+        )
+        assert 'b=params_examples.track_find_test' in href
+        assert 'commit=' in href
+
+
+@pytest.mark.flaky(reruns=1, reruns_delay=5)
+def test_web_explore_graph(browser, basic_html):
+    html_dir, dvcs = basic_html
+
+    with tools.preview(html_dir) as base_url:
+        get_with_retry(
+            browser,
+            f'{base_url}explore.html#b=params_examples.track_find_test'
+            '&o=params_examples.track_bytes&e-cpu=Blazingly%20fast&e-ram=128GB&e-NUL=%5Bnone%5D',
+        )
+        # One panel per unit
+        labels = _wait_for(
+            browser,
+            "var p = document.querySelectorAll('.panel-label');"
+            "return document.querySelectorAll('.uplot').length === 2"
+            "  ? Array.from(p, x => x.textContent) : null;",
+        )
+        assert labels == ['value', 'memory (MB)']
+        legend = browser.execute_script(
+            "return Array.from(document.querySelectorAll('.legend button'), b => b.textContent);"
+        )
+        assert legend == [
+            'params_examples.track_find_test · param1=1',
+            'params_examples.track_find_test · param1=2',
+            'params_examples.track_bytes',
+        ]
+
+        # Changes of the exact values: 0 -> 1 -> 3 -> 2, newest first
+        changes = browser.execute_script(
+            "return Array.from(document.querySelectorAll('tr[data-rev]'),"
+            "                  tr => tr.querySelectorAll('td')[3].textContent);"
+        )
+        assert changes[:2] == ['\u25bc' + MINUS + '33.3%'] * 2
+        assert '▲+200%' in changes
+
+        # Clicking a change pins its commit in the commit panel and the URL
+        browser.execute_script("document.querySelector('tr[data-rev]').click();")
+        _wait_for(browser, "return window.location.hash.includes('commit=');")
+        head = browser.execute_script(
+            "return document.querySelector('#commit-card h2').textContent;"
+        )
+        assert head == 'Pinned commit'
+
+
+@pytest.mark.flaky(reruns=1, reruns_delay=5)
+def test_web_explore_scatter(browser, basic_html):
+    html_dir, dvcs = basic_html
+
+    with tools.preview(html_dir) as base_url:
+        get_with_retry(
+            browser,
+            f'{base_url}explore.html#b=params_examples.track_find_test&view=scatter'
+            '&e-cpu=Blazingly%20fast&e-ram=128GB&e-NUL=%5Bnone%5D',
+        )
+        legend = _wait_for(
+            browser,
+            "var l = document.querySelector('.legend');"
+            "return document.querySelector('.panel canvas') && l ? l.textContent : null;",
+        )
+        assert 'x: param1=1' in legend
+        assert 'y: param1=2' in legend

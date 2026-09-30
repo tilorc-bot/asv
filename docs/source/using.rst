@@ -401,6 +401,28 @@ These settings are kept in the URL, e.g.
 ``#bench.time_x?overlay=bench.track_count&y-axis-scale=normalize&plot=change``,
 so a view can be linked to.
 
+The **Explore** page (``explore.html``, linked from the navigation bar)
+is a second view of the same results:
+
+- Its overview lists what changed recently: for each benchmark, the last
+  change between two consecutive commits that exceeds the noise, with the
+  commit's subject, and the largest such change.  A timing changes beyond
+  the noise when the 99% confidence intervals of the two results do not
+  overlap; a value without confidence intervals (e.g. a count from a
+  ``track_`` benchmark) on any change.  A threshold hides smaller changes.
+
+- Its graph shows each benchmark's confidence interval as a band around
+  the line, marks the changes beyond the noise, and lists them with their
+  commits.  Hovering or pinning a commit shows every line's value at that
+  commit and its change from the previous one.  Benchmarks added to the
+  graph with ``+`` in the benchmark list share the commit axis; lines with
+  different units get separate panels, and the indexed scale puts them on
+  one axis as % of their first value.  The "change vs change" view is the
+  scatter described above.
+
+The machine, branch and scale settings stay selected when switching
+between benchmarks.
+
 To share the website on the open internet, simply put the files in the
 ``html`` directory on any webserver that can serve static content.  Github Pages
 works quite well, for example.  For using Github Pages, ``asv``
