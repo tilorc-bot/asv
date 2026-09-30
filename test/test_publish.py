@@ -202,6 +202,44 @@ def test_publish_commit_subjects(generate_result_dir):
     assert subjects == {commit: f"Revision {i + 1}" for i, commit in enumerate(commits)}
 
 
+def test_publish_details_and_changes(generate_result_dir):
+    # Timings with samples, so that they get confidence intervals; the
+    # second commit's change is within the noise
+    samples = [
+        [1.0, 1.1, 0.9, 1.05, 0.95],
+        [1.02, 1.12, 0.92, 1.07, 0.97],
+        [1.0, 1.1, 0.9, 1.05, 0.95],
+        [10.0, 10.5, 9.5, 10.2, 9.8],
+        [10.0, 10.5, 9.5, 10.2, 9.8],
+    ]
+    conf, repo, commits = generate_result_dir(
+        [{'result': [sorted(s)[2]], 'samples': [s]} for s in samples]
+    )
+    tools.run_asv_with_conf(conf, "publish")
+    data = util.load_json(join(conf.html_dir, 'index.json'))
+    hash_to_rev = {h: int(r) for r, h in data['revision_to_hash'].items()}
+
+    # Confidence intervals of the timings, next to the graph
+    detail = util.load_json(
+        join(conf.html_dir, _graph_path(repo.dvcs).replace('graphs', 'details', 1))
+    )
+    assert [row[0] for row in detail['interval']] == [hash_to_rev[c] for c in commits]
+    for rev, lo, hi in detail['interval']:
+        assert lo <= hi
+
+    # The step from 1 to 10 is the only change beyond the noise
+    changes = util.load_json(join(conf.html_dir, 'changes.json'))
+    entries = changes['time_func']
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry['series'] is None
+    assert entry['last'] == [hash_to_rev[commits[-1]], 10.0]
+    prev_rev, rev, before, after = entry['last_change']
+    assert (prev_rev, rev) == (hash_to_rev[commits[2]], hash_to_rev[commits[3]])
+    assert (before, after) == (1.0, 10.0)
+    assert entry['largest_change'] == entry['last_change']
+
+
 @pytest.mark.flaky_pypy
 def test_regression_simple(generate_result_dir):
     conf, repo, commits = generate_result_dir(5 * [1] + 5 * [10])

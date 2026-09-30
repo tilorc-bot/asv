@@ -1,5 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import datetime
+import math
 import multiprocessing
 import os
 import shutil
@@ -30,6 +31,49 @@ GRAPH_UI_RESERVED_PARAMS = frozenset(
         'scatter-x',
     }
 )
+
+
+def recent_changes(graphs):
+    """
+    For each line of each benchmark, its last value and the last and the
+    largest commit-to-commit change that exceeds the noise (see
+    `Graph.get_changes`), so that an overview page need not load every
+    graph::
+
+        {benchmark: [{"params": graph params, "series": index or None,
+                      "last": [revision, value],
+                      "last_change": [prev_revision, revision, before, after],
+                      "largest_change": [...]}]}
+    """
+    result = {}
+    for path, graph in graphs:
+        data = graph.get_series_data()
+        per_series = graph.get_changes()
+        for j, changes in enumerate(per_series):
+            last = None
+            for rev, values in reversed(data):
+                if not util.is_na(values[j]):
+                    last = [rev, values[j]]
+                    break
+            if last is None:
+                continue
+
+            def size(change):
+                before, after = change[2], change[3]
+                if before and after and before > 0 and after > 0:
+                    return abs(math.log(after / before))
+                return math.inf
+
+            result.setdefault(graph.benchmark_name, []).append(
+                {
+                    'params': graph.params,
+                    'series': None if graph.scalar_series else j,
+                    'last': last,
+                    'last_change': list(changes[-1]) if changes else None,
+                    'largest_change': list(max(changes, key=size)) if changes else None,
+                }
+            )
+    return result
 
 
 def check_benchmark_params(name, benchmark):
@@ -219,12 +263,16 @@ class Publish(Command):
                     b_params = b['params']
 
                     result = results.get_result_value(key, b_params)
-                    weight = [
-                        _stats.get_weight(s) for s in results.get_result_stats(key, b_params)
+                    stats = results.get_result_stats(key, b_params)
+                    weight = [_stats.get_weight(s) for s in stats]
+                    interval = [
+                        (s['ci_99_a'], s['ci_99_b']) if s and 'ci_99_a' in s else None
+                        for s in stats
                     ]
                     if not b_params:
                         result = result[0]
                         weight = weight[0]
+                        interval = interval[0]
 
                     benchmark_names.add(key)
 
@@ -258,7 +306,9 @@ class Publish(Command):
 
                         # Create graph
                         graph = graphs.get_graph(key, cur_params)
-                        graph.add_data_point(revisions[results.commit_hash], result, weight)
+                        graph.add_data_point(
+                            revisions[results.commit_hash], result, weight, interval
+                        )
 
             # Get the parameter sets for all graphs
             graph_param_list = []
@@ -284,6 +334,9 @@ class Publish(Command):
         with log.indent():
             # Save files
             graphs.save(conf.html_dir, dots=log.dot)
+            util.write_json(
+                os.path.join(conf.html_dir, "changes.json"), recent_changes(graphs), compact=True
+            )
 
         pages = []
         classes = sorted(util.iter_subclasses(OutputPublisher), key=lambda cls: cls.order)

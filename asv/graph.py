@@ -101,6 +101,7 @@ class Graph:
         self.params = params
         self.data_points = {}
         self.data_weights = {}
+        self.data_intervals = {}
 
         self.path = self.get_file_path(self.params, benchmark_name)
         self.n_series = None
@@ -130,7 +131,7 @@ class Graph:
         parts.append(util.sanitize_filename(benchmark_name))
         return os.path.join(*parts)
 
-    def add_data_point(self, revision, value, weight=None):
+    def add_data_point(self, revision, value, weight=None, interval=None):
         """
         Add a data point to the graph.
 
@@ -146,13 +147,18 @@ class Graph:
             Weights corresponding to the values.
             Missing estimates are indicated with None.
 
+        interval : (float, float) or list or None
+            Confidence interval (low, high) of each value, if known.
+
         """
         self.data_points.setdefault(revision, [])
         self.data_weights.setdefault(revision, [])
+        self.data_intervals.setdefault(revision, [])
         if not is_na(value):
             if not hasattr(value, '__len__'):
                 value = [value]
                 weight = [weight]
+                interval = [interval]
             else:
                 self.scalar_series = False
 
@@ -163,9 +169,12 @@ class Graph:
 
             if weight is None:
                 weight = [None] * len(value)
+            if interval is None:
+                interval = [None] * len(value)
 
             self.data_points[revision].append(value)
             self.data_weights[revision].append(weight)
+            self.data_intervals[revision].append(interval)
 
     def get_data(self):
         """
@@ -211,9 +220,48 @@ class Graph:
 
         return val
 
+    def get_series_data(self):
+        """
+        Like `get_data`, but as ``(revision, [value, ...])`` also for a
+        graph with a single series, and without weights.
+        """
+        if self.scalar_series:
+            return [(rev, [v]) for rev, v, w in self.get_data()]
+        return [(rev, v) for rev, v, w in self.get_data()]
+
+    def get_intervals(self, revisions):
+        """
+        Get the confidence interval of each series at the given
+        revisions, averaged like the values, as a list of
+        ``(revision, [(low, high) or None, ...])``.
+        """
+        result = []
+        for rev in revisions:
+            entries = [entry for entry in self.data_intervals.get(rev, []) if entry is not None]
+            series = []
+            for j in range(self.n_series):
+                pairs = [e[j] for e in entries if j < len(e) and e[j] is not None]
+                pairs = [p for p in pairs if not is_na(p[0]) and not is_na(p[1])]
+                if pairs:
+                    series.append((mean_na(p[0] for p in pairs), mean_na(p[1] for p in pairs)))
+                else:
+                    series.append(None)
+            result.append((rev, series))
+        return result
+
+    @property
+    def detail_path(self):
+        """
+        Path of the file with the confidence intervals and detected steps,
+        the graph's path under ``details/`` instead of ``graphs/``.
+        """
+        return os.path.join('details', os.path.relpath(self.path, 'graphs'))
+
     def save(self, html_dir):
         """
-        Save the graph to a .json file used by the frontend.
+        Save the graph to a .json file used by the frontend, and the
+        confidence intervals of its values (an empty list when unknown)
+        to a second file under ``details/``.
 
         Parameters
         ----------
@@ -222,10 +270,71 @@ class Graph:
         """
         filename = os.path.join(html_dir, self.path + ".json")
 
+        data = self.get_data()
+
         # Drop weights
-        val = [v[:2] for v in self.get_data()]
+        val = [v[:2] for v in data]
 
         util.write_json(filename, val, compact=True)
+
+        interval = []
+        for rev, series in self.get_intervals([v[0] for v in data]):
+            if all(s is None for s in series):
+                continue
+            if self.scalar_series:
+                interval.append([rev, series[0][0], series[0][1]])
+            else:
+                interval.append(
+                    [
+                        rev,
+                        [None if s is None else s[0] for s in series],
+                        [None if s is None else s[1] for s in series],
+                    ]
+                )
+
+        if 'summary' not in self.params:
+            # Written also when empty, so the frontend need not ask for
+            # files that do not exist
+            util.write_json(
+                os.path.join(html_dir, self.detail_path + ".json"),
+                {'interval': interval},
+                compact=True,
+            )
+
+    def get_changes(self):
+        """
+        Commit-to-commit changes of each series that exceed the noise.
+
+        A change between two consecutive commits with data counts when
+        their confidence intervals do not overlap.  A series without any
+        confidence intervals (e.g. a count from a track_ benchmark) is
+        taken as exact, so any change counts.
+
+        Returns
+        -------
+        changes : list of list of (prev_revision, revision, before, after)
+            One list per series.
+        """
+        data = self.get_series_data()
+        intervals = dict(self.get_intervals([v[0] for v in data]))
+        result = []
+        for j in range(self.n_series):
+            points = [
+                (rev, values[j], intervals[rev][j]) for rev, values in data if not is_na(values[j])
+            ]
+            exact = all(ci is None for rev, y, ci in points)
+            changes = []
+            for (rev_a, a, ci_a), (rev_b, b, ci_b) in zip(points, points[1:]):
+                if exact:
+                    significant = a != b
+                elif ci_a is not None and ci_b is not None:
+                    significant = ci_b[0] > ci_a[1] or ci_b[1] < ci_a[0]
+                else:
+                    significant = False
+                if significant:
+                    changes.append((rev_a, rev_b, a, b))
+            result.append(changes)
+        return result
 
     def detect_steps(self, pool=None):
         """

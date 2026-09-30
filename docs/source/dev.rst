@@ -253,6 +253,17 @@ A benchmark suite directory has the following layout.  The
     - ``revision_to_subject``: A dictionary mapping revision number to the
       first line of the commit message, shown in the graph tooltips.
 
+  - ``details/``: For each file in ``graphs/`` (except the summaries), a
+    file at the same path holding ``{"interval": [[revision, low, high],
+    ...]}``, the 99% confidence interval of each value (lists of lows and
+    highs for parameterized benchmarks); empty when the benchmark records
+    no statistics.
+
+  - ``changes.json``: For each benchmark and each of its lines, the last
+    value and the last and the largest change between consecutive commits
+    that exceeds the noise, as ``[previous_revision, revision, before,
+    after]``.  Used by the overview of ``explore.html``.
+
     - ``machines``: Describes the machines used for testing.
 
     - ``params``: A dictionary of parameters against which benchmark

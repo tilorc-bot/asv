@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 from asv import util
 from asv.graph import (
     RESAMPLED_POINTS,
@@ -271,3 +273,42 @@ def test_graph_filename_sanitization():
 
 def _sgn(x):
     return 1 if x >= 0 else -1
+
+
+def test_graph_intervals_and_changes(tmpdir):
+    # A timing: intervals decide which changes exceed the noise
+    g = Graph('time_foo', {'machine': 'a'})
+    g.add_data_point(1, 1.0, None, (0.9, 1.1))
+    g.add_data_point(2, 1.05, None, (0.95, 1.15))  # overlaps: noise
+    g.add_data_point(3, 2.0, None, (1.9, 2.1))  # clear step
+    g.add_data_point(4, 2.2, None, None)  # no interval: not judged
+    g.add_data_point(4, 2.2, None, None)
+    assert g.get_intervals([1, 3, 4]) == [(1, [(0.9, 1.1)]), (3, [(1.9, 2.1)]), (4, [None])]
+    assert g.get_changes() == [[(2, 3, 1.05, 2.0)]]
+
+    # Two results for one revision are averaged, like the values
+    g.add_data_point(3, 2.0, None, (1.7, 2.3))
+    assert g.get_intervals([3])[0][1][0] == pytest.approx((1.8, 2.2))
+
+    g.save(str(tmpdir))
+    detail = util.load_json(os.path.join(str(tmpdir), g.detail_path + '.json'))
+    assert [row[0] for row in detail['interval']] == [1, 2, 3]
+    assert detail['interval'][2][1:] == pytest.approx([1.8, 2.2])
+    assert g.detail_path == os.path.join('details', 'machine-a', 'time_foo')
+
+    # A count without intervals is exact: every change counts
+    g = Graph('track_foo', {})
+    for rev, value in [(1, 5), (2, 5), (3, 6), (4, 4)]:
+        g.add_data_point(rev, value)
+    assert g.get_changes() == [[(2, 3, 5, 6), (3, 4, 6, 4)]]
+    g.save(str(tmpdir))
+    assert util.load_json(os.path.join(str(tmpdir), g.detail_path + '.json')) == {'interval': []}
+
+    # Parameterized: one list per series
+    g = Graph('track_bar', {})
+    g.add_data_point(1, [1.0, 10.0], None, [(0.9, 1.1), None])
+    g.add_data_point(2, [3.0, 10.0], None, [(2.9, 3.1), None])
+    assert g.get_changes() == [[(1, 2, 1.0, 3.0)], []]
+    g.save(str(tmpdir))
+    detail = util.load_json(os.path.join(str(tmpdir), g.detail_path + '.json'))
+    assert detail == {'interval': [[1, [0.9, None], [1.1, None]], [2, [2.9, None], [3.1, None]]]}

@@ -493,8 +493,10 @@ def generate_result_dir(tmpdir, dvcs, values, branches=None, updated=None):
     params = []
     param_names = None
     for commit, value in values.items():
+        samples = None
         if isinstance(value, dict):
-            params = value["params"]
+            params = value.get("params", [])
+            samples = value.get("samples")
             value = value["result"]
         else:
             value = [value]
@@ -503,8 +505,8 @@ def generate_result_dir(tmpdir, dvcs, values, branches=None, updated=None):
         )
         value = runner.BenchmarkResult(
             result=value,
-            samples=[None] * len(value),
-            number=[None] * len(value),
+            samples=samples or [None] * len(value),
+            number=[1 if samples else None] * len(value),
             errcode=0,
             stderr='',
             profile=None,
